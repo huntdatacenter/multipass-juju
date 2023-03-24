@@ -32,4 +32,11 @@ Mounting is configured to work same as in Vagrant, project directory is mounted 
 To be able to mount your project inside the VM on MacOS make sure to allow
 System settings > Privacy > `Full disk access` for `multipassd`.
 
+### Integrate
 
+Feel free to integrate into your Juju charm project.
+
+```
+wget https://raw.githubusercontent.com/huntdatacenter/multipass-juju/main/juju.yaml
+wget https://raw.githubusercontent.com/huntdatacenter/multipass-juju/main/Makefile
+```
