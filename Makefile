@@ -2,14 +2,15 @@
 
 # Use one shell for all commands in a target recipe
 .ONESHELL:
-.PHONY: help list launch mount bootstrap up down ssh destroy bridge
+.PHONY: help list launch mount umount bootstrap up down ssh destroy bridge
 # Set default goal
 .DEFAULT_GOAL := help
 # Use bash shell in Make instead of sh
 SHELL := /bin/bash
 
+# Multipass variables
 UBUNTU_VERSION = jammy
-MOUNT_TARGET = /vagrant
+MOUNT_TARGET = /home/ubuntu/vagrant
 DIR_NAME = "$(shell basename $(shell pwd))"
 VM_NAME = juju-dev--$(DIR_NAME)
 
@@ -35,7 +36,13 @@ bootstrap:
 	multipass exec $(VM_NAME) -- juju bootstrap localhost lxd --bootstrap-constraints arch=$(ARCH) \
 	&& multipass exec $(VM_NAME) -- juju add-model default
 
-up: launch mount bootstrap  ## Start a VM
+up: launch mount bootstrap ssh  ## Start a VM
+
+fwd:  ## Forward app port: make unit=prometheus/0 port=9090 fwd
+	$(eval VMIP := $(shell multipass exec $(VM_NAME) -- hostname -I | cut -d' ' -f1))
+	echo "Opening browser: http://$(VMIP):$(port)"
+	bash -c "(sleep 1; open 'http://$(VMIP):$(port)') &"
+	multipass exec $(VM_NAME) -- juju ssh $(unit) -N -L 0.0.0.0:$(port):0.0.0.0:$(port)
 
 down:  ## Stop the VM
 	multipass down $(VM_NAME)
