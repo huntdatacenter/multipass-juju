@@ -2,6 +2,7 @@
 
 # Use one shell for all commands in a target recipe
 .ONESHELL:
+.EXPORT_ALL_VARIABLES:
 .PHONY: help list launch mount umount bootstrap up down ssh destroy bridge
 # Set default goal
 .DEFAULT_GOAL := help
@@ -36,22 +37,22 @@ bootstrap:
 	multipass exec $(VM_NAME) -- juju bootstrap localhost lxd --bootstrap-constraints arch=$(ARCH) \
 	&& multipass exec $(VM_NAME) -- juju add-model default
 
+ssh:  ## Connect into the VM
+	multipass exec -d $(MOUNT_TARGET) $(VM_NAME) -- bash --login
+
 up: launch mount bootstrap ssh  ## Start a VM
+
+down:  ## Stop the VM
+	multipass down $(VM_NAME)
+
+destroy:  ## Destroy the VM
+	multipass delete -v --purge $(VM_NAME)
 
 fwd:  ## Forward app port: make unit=prometheus/0 port=9090 fwd
 	$(eval VMIP := $(shell multipass exec $(VM_NAME) -- hostname -I | cut -d' ' -f1))
 	echo "Opening browser: http://$(VMIP):$(port)"
 	bash -c "(sleep 1; open 'http://$(VMIP):$(port)') &"
 	multipass exec $(VM_NAME) -- juju ssh $(unit) -N -L 0.0.0.0:$(port):0.0.0.0:$(port)
-
-down:  ## Stop the VM
-	multipass down $(VM_NAME)
-
-ssh:  ## Connect into the VM
-	multipass exec -d $(MOUNT_TARGET) $(VM_NAME) -- bash
-
-destroy:  ## Destroy the VM
-	multipass delete -v --purge $(VM_NAME)
 
 bridge:
 	sudo route -nv add -net 192.168.64.0/24 -interface bridge100
