@@ -43,7 +43,7 @@ ssh:  ## Connect into the VM
 up: launch mount bootstrap ssh  ## Start a VM
 
 down:  ## Stop the VM
-	multipass down $(VM_NAME)
+	multipass delete -v $(VM_NAME)
 
 destroy:  ## Destroy the VM
 	multipass delete -v --purge $(VM_NAME)
