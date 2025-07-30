@@ -5,6 +5,7 @@ packages:
   - jq
   - tox
   - gnome-keyring
+  - unzip
 
 bootcmd:
   - printf "[Resolve]\nDNS=1.1.1.1\n" > /etc/systemd/resolved.conf
@@ -13,11 +14,10 @@ bootcmd:
 snap:
   commands:
     - snap install multipass-sshfs
+    - snap install yq
     # - snap install lxd --channel=5.0/stable
-    - snap install juju --channel=3.1/stable
-    - snap install charmcraft --classic --channel=1.7/stable
-    # - snap install charm --classic --channel=stable
-    # - snap refresh
+    - snap install juju --channel=3.6/stable
+    - snap install charmcraft --classic --channel=latest/stable
 
 runcmd:
   - DEBIAN_FRONTEND=noninteractive apt -y upgrade
@@ -57,18 +57,17 @@ runcmd:
 
   - |
     # Make sure juju directory is there
+    sudo -u ubuntu HOME=/home/ubuntu bash -c "curl -LsSf https://astral.sh/uv/install.sh -o /tmp/uv.sh && sh /tmp/uv.sh"
     sudo -u ubuntu mkdir -p /home/ubuntu/.local/share/juju
     sudo -u ubuntu HOME=/home/ubuntu juju
-    sudo -u ubuntu bash -c "echo alias watch-juju=\'juju status --watch 3s\' >> /home/ubuntu/.bashrc"
-
-  - |
-    # Create symlink for compatibility but mount inside home so that juju snap can access
-    ln -sf /home/ubuntu/vagrant /vagrant
+    sudo -u ubuntu bash -c "echo alias watch-juju=\'juju status --watch 3s --storage\' >> /home/ubuntu/.bashrc"
+    sudo -u ubuntu bash -c "echo '[ -z "\$TMUX" ] && exec tmux new-session -A -s workspace' >> /home/ubuntu/.bashrc"
 
   # - |
   #   # Bootstrap juju controller
   #   sudo -u ubuntu HOME=/home/ubuntu juju
   #   sudo -u ubuntu HOME=/home/ubuntu juju bootstrap localhost lxd
+  #   # Bootstrapping was moved to Makefile, to allow interacting with VM while bootstrapping happens
 
 final_message: "The system is finally up, after $UPTIME seconds"
 
