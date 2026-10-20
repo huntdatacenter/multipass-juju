@@ -3,7 +3,7 @@
 # Use one shell for all commands in a target recipe
 .ONESHELL:
 .EXPORT_ALL_VARIABLES:
-.PHONY: help name list launch mount umount bootstrap up down ssh port-forward destroy
+.PHONY: help name list launch mount umount bootstrap up up-k8s k8s down ssh port-forward destroy
 
 # Set default goal
 .DEFAULT_GOAL := help
@@ -15,6 +15,14 @@ UBUNTU_VERSION = resolute
 MOUNT_TARGET = /home/ubuntu/$(DIR_NAME)
 DIR_NAME = "$(shell basename $(shell pwd))"
 VM_NAME = juju-dev--$(DIR_NAME)
+MEMORY = 4G
+CPUS = 4
+DISK = 20G
+
+# Charmed Kubernetes variables (only 1.36+ supports ubuntu@26.04 base)
+K8S_CHANNEL = 1.36/candidate
+K8S_CLOUD = ck8s
+K8S_MODEL = k8s-dev
 
 name:  ## Print name of the VM
 	echo "$(VM_NAME)"
@@ -23,7 +31,7 @@ list:  ## List existing VMs
 	multipass list
 
 launch:
-	multipass launch $(UBUNTU_VERSION) -v --timeout 3600 --name $(VM_NAME) --memory 4G --cpus 4 --disk 20G --cloud-init juju.yaml \
+	multipass launch $(UBUNTU_VERSION) -v --timeout 3600 --name $(VM_NAME) --memory $(MEMORY) --cpus $(CPUS) --disk $(DISK) --cloud-init juju.yaml \
 	&& multipass exec $(VM_NAME) -- cloud-init status
 
 mount:
@@ -38,7 +46,15 @@ bootstrap:
 	multipass exec $(VM_NAME) -- juju bootstrap localhost lxd --bootstrap-constraints arch=$(ARCH) \
 	&& multipass exec $(VM_NAME) -- juju add-model default
 
+k8s:
+	multipass exec $(VM_NAME) -- env K8S_CHANNEL=$(K8S_CHANNEL) K8S_CLOUD=$(K8S_CLOUD) K8S_MODEL=$(K8S_MODEL) deploy-ck8s
+
 up: launch mount bootstrap ssh  ## Start a VM
+
+# Kubernetes needs more resources, target-specific values apply to launch as well
+up-k8s: MEMORY = 8G
+up-k8s: DISK = 50G
+up-k8s: launch mount bootstrap k8s ssh  ## Start a VM with single-node Charmed Kubernetes
 
 down:  ## Stop the VM
 	multipass down $(VM_NAME)
@@ -62,4 +78,4 @@ destroy:  ## Destroy the VM
 
 # Display target comments in 'make help'
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {sub("\\\\n",sprintf("\n%22c"," "), $$2);printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {sub("\\\\n",sprintf("\n%22c"," "), $$2);printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

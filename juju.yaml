@@ -7,6 +7,105 @@ packages:
   - gnome-keyring
   - unzip
 
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-root-owned-keys.conf
+    content: |
+      # Keep multipass access when juju agent rewrites ~/.ssh/authorized_keys of manual machine
+      AuthorizedKeysFile .ssh/authorized_keys /etc/ssh/authorized_keys.d/%u
+  - path: /etc/ssh/ssh_config.d/99-accept-new.conf
+    content: |
+      # Dev VM: trust host keys on first connection (juju ssh, manual provisioning)
+      Host *
+        StrictHostKeyChecking accept-new
+        UpdateHostKeys no
+  - path: /etc/sysctl.d/99-k8s.conf
+    content: |
+      # Kubernetes and LXD both need plenty of inotify watches
+      fs.inotify.max_user_instances = 1024
+      fs.inotify.max_user_watches = 1048576
+  - path: /usr/local/bin/deploy-ck8s
+    content: |
+      #!/bin/bash
+      # Deploy single-node Charmed Kubernetes (k8s charm) onto this VM and register it as Juju k8s cloud.
+      # The VM itself is added to the lxd controller as a manual machine, since k8s cannot run in LXD containers.
+      set -euo pipefail
+
+      CONTROLLER=${CONTROLLER:-lxd}
+      MACHINE_MODEL=${MACHINE_MODEL:-ck8s}
+      K8S_CHANNEL=${K8S_CHANNEL:-1.36/candidate}
+      K8S_BASE=${K8S_BASE:-ubuntu@$(. /etc/os-release && echo $VERSION_ID)}
+      ARCH=$(dpkg --print-architecture)
+      K8S_CLOUD=${K8S_CLOUD:-ck8s}
+      K8S_MODEL=${K8S_MODEL:-k8s-dev}
+      KUBECTL="sudo k8s kubectl"
+
+      mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+      if (( mem_kb < 7000000 )); then
+        echo "ERROR: Charmed Kubernetes needs at least 8G of memory, recreate VM with: make up-k8s" >&2
+        exit 1
+      fi
+
+      HOST_IP=$(ip -4 route get 1.1.1.1 | awk '{for (i=1; i<NF; i++) if ($i == "src") print $(i+1)}')
+
+      # Authorize juju client keys to ssh into this VM (needed by manual provisioning)
+      juju controllers > /dev/null
+      mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys
+      for key in ~/.local/share/juju/ssh/*.pub; do
+        grep -qxF "$(cat "$key")" ~/.ssh/authorized_keys || cat "$key" >> ~/.ssh/authorized_keys
+      done
+      chmod 600 ~/.ssh/authorized_keys
+      # Juju snap cannot write ~/.ssh/known_hosts itself, so pre-trust the VM host key
+      ssh-keygen -F "$HOST_IP" > /dev/null 2>&1 || ssh-keyscan -t ed25519 "$HOST_IP" >> ~/.ssh/known_hosts 2> /dev/null
+
+      juju show-model "$CONTROLLER:$MACHINE_MODEL" &> /dev/null \
+        || juju add-model "$MACHINE_MODEL" localhost --controller "$CONTROLLER" --no-switch
+
+      machine=$(juju machines -m "$CONTROLLER:$MACHINE_MODEL" --format json | jq -r '.machines // {} | keys[0] // empty')
+      if [ -z "$machine" ]; then
+        echo "# Adding VM ($HOST_IP) as manual machine"
+        juju add-machine -m "$CONTROLLER:$MACHINE_MODEL" "ssh:ubuntu@$HOST_IP"
+        machine=$(juju machines -m "$CONTROLLER:$MACHINE_MODEL" --format json | jq -r '.machines | keys[0]')
+      fi
+
+      juju show-application -m "$CONTROLLER:$MACHINE_MODEL" k8s &> /dev/null \
+        || juju deploy -m "$CONTROLLER:$MACHINE_MODEL" k8s --channel "$K8S_CHANNEL" --base "$K8S_BASE" --constraints "arch=$ARCH" --to "$machine"
+
+      echo "# Waiting for k8s to become active (watch progress with: juju status -m $MACHINE_MODEL)"
+      # juju wait-for is not available in Juju 4, poll status instead (up to 60 minutes)
+      for _ in $(seq 360); do
+        status=$(juju status -m "$CONTROLLER:$MACHINE_MODEL" --format json | jq -r '.applications.k8s["application-status"] | "\(.current): \(.message // "")"')
+        case "$status" in
+          active:*) break ;;
+          error:*|blocked:*) echo "ERROR k8s is $status" >&2; exit 1 ;;
+        esac
+        sleep 10
+      done
+      [[ "$status" == active:* ]] || { echo "ERROR timed out waiting for k8s ($status)" >&2; exit 1; }
+
+      echo "# Waiting for node and default storage class"
+      $KUBECTL wait --for condition=Ready node --all --timeout 15m
+      for _ in $(seq 90); do
+        $KUBECTL get storageclass -o json \
+          | jq -e '.items[] | select(.metadata.annotations["storageclass.kubernetes.io/is-default-class"] == "true")' > /dev/null \
+          && break
+        sleep 10
+      done
+
+      mkdir -p ~/.kube
+      sudo k8s config > ~/.kube/config
+      chmod 600 ~/.kube/config
+
+      juju clouds --controller "$CONTROLLER" --format json | jq -e --arg cloud "$K8S_CLOUD" 'has($cloud)' > /dev/null \
+        || sudo k8s config | juju add-k8s "$K8S_CLOUD" --controller "$CONTROLLER"
+
+      juju show-model "$CONTROLLER:$K8S_MODEL" &> /dev/null \
+        || juju add-model "$K8S_MODEL" "$K8S_CLOUD" --controller "$CONTROLLER"
+      # Juju defaults to amd64, pods would not get scheduled on arm64 node without this
+      juju set-model-constraints -m "$CONTROLLER:$K8S_MODEL" "arch=$ARCH"
+      juju switch "$CONTROLLER:$K8S_MODEL"
+
+      echo "# Charmed Kubernetes is ready: deploy k8s charms into model '$K8S_MODEL', kubectl uses ~/.kube/config"
+
 bootcmd:
   - printf "[Resolve]\nDNS=1.1.1.1\n" > /etc/systemd/resolved.conf
   - [systemctl, restart, systemd-resolved]
@@ -15,6 +114,7 @@ snap:
   commands:
     - snap install multipass-sshfs
     - snap install yq
+    - snap install kubectl --classic
     # - snap install lxd --channel=5.0/stable
     - snap install juju --channel=4.0/stable
     - snap install charmcraft --classic --channel=latest/stable
@@ -48,6 +148,13 @@ runcmd:
 
   - |
     adduser ubuntu lxd
+    chmod 755 /usr/local/bin/deploy-ck8s
+
+  - |
+    # Copy multipass ssh key into root-owned file used by sshd
+    install -d -m 755 /etc/ssh/authorized_keys.d
+    install -m 644 /home/ubuntu/.ssh/authorized_keys /etc/ssh/authorized_keys.d/ubuntu
+    systemctl reload ssh
 
   - |
     # setup charmcraft
