@@ -68,7 +68,7 @@ write_files:
       fi
 
       juju show-application -m "$CONTROLLER:$MACHINE_MODEL" k8s &> /dev/null \
-        || juju deploy -m "$CONTROLLER:$MACHINE_MODEL" k8s --channel "$K8S_CHANNEL" --base "$K8S_BASE" --constraints "arch=$ARCH" --to "$machine"
+        || juju deploy -m "$CONTROLLER:$MACHINE_MODEL" ch:k8s --channel "$K8S_CHANNEL" --base "$K8S_BASE" --constraints "arch=$ARCH" --to "$machine"
 
       echo "# Waiting for k8s to become active (watch progress with: juju status -m $MACHINE_MODEL)"
       # juju wait-for is not available in Juju 4, poll status instead (up to 60 minutes)
