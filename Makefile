@@ -3,7 +3,7 @@
 # Use one shell for all commands in a target recipe
 .ONESHELL:
 .EXPORT_ALL_VARIABLES:
-.PHONY: help list launch mount bootstrap up down ssh destroy bridge
+.PHONY: help name list launch mount umount bootstrap up down ssh port-forward destroy
 
 # Set default goal
 .DEFAULT_GOAL := help
@@ -11,7 +11,7 @@
 SHELL := /bin/bash
 
 # Multipass variables
-UBUNTU_VERSION = noble
+UBUNTU_VERSION = resolute
 MOUNT_TARGET = /home/ubuntu/$(DIR_NAME)
 DIR_NAME = "$(shell basename $(shell pwd))"
 VM_NAME = juju-dev--$(DIR_NAME)

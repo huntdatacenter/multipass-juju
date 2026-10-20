@@ -16,7 +16,7 @@ snap:
     - snap install multipass-sshfs
     - snap install yq
     # - snap install lxd --channel=5.0/stable
-    - snap install juju --channel=3.6/stable
+    - snap install juju --channel=4.0/stable
     - snap install charmcraft --classic --channel=latest/stable
 
 runcmd:
@@ -67,7 +67,6 @@ runcmd:
   #   # Bootstrap juju controller
   #   sudo -u ubuntu HOME=/home/ubuntu juju
   #   sudo -u ubuntu HOME=/home/ubuntu juju bootstrap localhost lxd
-  #   # Bootstrapping was moved to Makefile, to allow interacting with VM while bootstrapping happens
+  #   # Juju bootstrap was moved to Makefile, to allow interacting with VM while bootstrapping happens
 
 final_message: "The system is finally up, after $UPTIME seconds"
-
